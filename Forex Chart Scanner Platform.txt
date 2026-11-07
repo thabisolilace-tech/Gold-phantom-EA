@@ -1,0 +1,1081 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Upload, Image as ImageIcon, RefreshCw, Layers, ShieldAlert,
+  TrendingUp, TrendingDown, Target, DollarSign, Calculator,
+  Palette, Sun, Moon, Zap, BarChart2, CheckCircle, AlertTriangle,
+  Eye, Trash2, Settings, Download, Info, Check, ArrowRight, Play,
+  Volume2, VolumeX, Sparkles, Sliders, Copy, Share2, Award, Clock,
+  CheckSquare, Filter, ChevronRight, FileText
+} from 'lucide-react';
+
+export default function App() {
+  // Theme State (cyber-neon, slate-dark, obsidian-gold, light)
+  const [theme, setTheme] = useState('cyber-neon');
+  
+  // Custom Branding State
+  const [customLogo, setCustomLogo] = useState('');
+  const [brandName, setBrandName] = useState('NEXUS FX PRO');
+  
+  // Trading Style Option: scalping, day, swing, position
+  const [tradingStyle, setTradingStyle] = useState('day'); // default Day Trading
+  
+  // Strategy Preset: smc, retail, hybrid
+  const [strategyPreset, setStrategyPreset] = useState('smc');
+
+  // Account Currency Selection
+  const [accountCurrency, setAccountCurrency] = useState('USD');
+
+  // Multi-Timeframe Configurations based on Trading Style
+  const getTimeframeLabels = (style) => {
+    switch (style) {
+      case 'scalping':
+        return { htf: 'HTF (15M)', mtf: 'MTF (5M)', ltf: 'LTF (1M)' };
+      case 'swing':
+        return { htf: 'HTF (Daily)', mtf: 'MTF (4H)', ltf: 'LTF (1H)' };
+      case 'position':
+        return { htf: 'HTF (Weekly)', mtf: 'MTF (Daily)', ltf: 'LTF (4H)' };
+      case 'day':
+      default:
+        return { htf: 'HTF (4H)', mtf: 'MTF (1H)', ltf: 'LTF (15M)' };
+    }
+  };
+
+  const tfLabels = getTimeframeLabels(tradingStyle);
+
+  // Screenshot Uploads
+  const [timeframes, setTimeframes] = useState({
+    htf: { name: 'Higher Timeframe', file: null, preview: null },
+    mtf: { name: 'Medium Timeframe', file: null, preview: null },
+    ltf: { name: 'Lower Timeframe', file: null, preview: null }
+  });
+
+  // Settings & Preferences
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [riskPercent, setRiskPercent] = useState(1.0);
+  const [accountBalance, setAccountBalance] = useState(10000);
+  const [pipValue, setPipValue] = useState(10); // $10 per standard lot
+  const [pairSymbol, setPairSymbol] = useState('EUR/USD');
+
+  // Analysis State
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [analysisError, setAnalysisError] = useState(null);
+  const [signalHistory, setSignalHistory] = useState([]);
+  const [copiedSignal, setCopiedSignal] = useState(false);
+
+  // Filter History Log by Style
+  const [historyFilter, setHistoryFilter] = useState('all');
+  
+  // Active Tab View
+  const [activeTab, setActiveTab] = useState('scanner'); // scanner, risk, history, settings
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState(null);
+
+  // Sound FX synthesis for signal alerts
+  const playSignalSound = (direction) => {
+    if (!soundEnabled) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      if (direction?.includes('BUY')) {
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3);
+      } else if (direction?.includes('SELL')) {
+        osc.frequency.setValueAtTime(600, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 0.3);
+      } else {
+        osc.frequency.setValueAtTime(500, ctx.currentTime);
+      }
+      
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (e) {
+      console.log('Audio playback prevented or unsupported');
+    }
+  };
+
+  // Handle Drag & Drop / File Uploads
+  const handleFileUpload = (tfKey, file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setTimeframes(prev => ({
+        ...prev,
+        [tfKey]: {
+          ...prev[tfKey],
+          file: file,
+          preview: reader.result
+        }
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeImage = (tfKey) => {
+    setTimeframes(prev => ({
+      ...prev,
+      [tfKey]: {
+        ...prev[tfKey],
+        file: null,
+        preview: null
+      }
+    }));
+  };
+
+  // Gemini API Multimodal Analysis Execution
+  const analyzeCharts = async () => {
+    const uploadedImages = Object.entries(timeframes).filter(([_, data]) => data.preview !== null);
+    
+    if (uploadedImages.length === 0) {
+      setAnalysisError("Please upload at least 1 timeframe chart screenshot to analyze.");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+
+    try {
+      const systemInstruction = `You are a Master Quantitative & Technical Forex Trader specializing in multi-style chart analysis (Scalping, Day Trading, Swing Trading, Position Trading).
+You evaluate Smart Money Concepts (SMC/ICT), Price Action, Liquidity Sweeps, Order Blocks, FVGs, and Indicator Divergences.
+Analyze chart screenshots specifically for a ${tradingStyle.toUpperCase()} strategy using the ${strategyPreset.toUpperCase()} framework.`;
+
+      const promptText = `Perform a rigorous ${tradingStyle.toUpperCase()} analysis on the attached chart screenshot(s) for ${pairSymbol} using ${strategyPreset.toUpperCase()} rules.
+
+Key Timeframe Context:
+- HTF: ${tfLabels.htf}
+- MTF: ${tfLabels.mtf}
+- LTF: ${tfLabels.ltf}
+
+Instructions:
+1. Determine Market Structure & Bias (BOS/CHoCH, Key Supply/Demand, Liquidity pools).
+2. Rate Setup Quality: "A+ Setup", "A Setup", "B Setup", or "NO TRADE ZONE".
+3. Provide signal direction ("STRONG BUY", "BUY", "STRONG SELL", "SELL", "WAIT / NEUTRAL").
+4. Provide precise Entry Zone, Stop Loss (price and exact pips distance), and Take Profit targets (TP1, TP2, TP3) with Risk:Reward.
+5. Provide ${tradingStyle.toUpperCase()} execution notes (e.g. spread awareness, session liquidity, trailing SL rules for scalps, or swap holding notes for swings).
+
+Return ONLY a single valid JSON object matching this schema strictly without markdown or surrounding text:
+{
+  "pair": "${pairSymbol}",
+  "tradingStyle": "${tradingStyle}",
+  "strategyPreset": "${strategyPreset}",
+  "direction": "STRONG BUY" | "BUY" | "STRONG SELL" | "SELL" | "WAIT / NEUTRAL",
+  "setupQuality": "A+ Setup" | "A Setup" | "B Setup" | "NO TRADE ZONE",
+  "confidence": number (50-98),
+  "entry": "exact price or tight zone e.g. 1.08520 - 1.08540",
+  "stopLoss": {
+    "price": "exact price",
+    "pips": number
+  },
+  "takeProfits": [
+    { "target": "TP1", "price": "exact price", "rr": "1:2" },
+    { "target": "TP2", "price": "exact price", "rr": "1:3.5" },
+    { "target": "TP3", "price": "exact price", "rr": "1:5" }
+  ],
+  "confluences": [
+    "HTF Trend alignment",
+    "Liquidity sweep of session high/low",
+    "Discounted Order Block + FVG entry"
+  ],
+  "executionNotes": "Specific style advice (e.g. Move SL to BE after TP1 hit, watch NY open volatility).",
+  "reasoningSummary": "Concise technical summary justifying this signal."
+}`;
+
+      const imageParts = uploadedImages.map(([tfKey, data]) => {
+        const base64Data = data.preview.split(',')[1];
+        const mimeType = data.preview.split(';')[0].slice(5);
+        return {
+          inlineData: {
+            mimeType: mimeType || 'image/png',
+            data: base64Data
+          }
+        };
+      });
+
+      const contents = [
+        {
+          role: 'user',
+          parts: [
+            { text: promptText },
+            ...imageParts
+          ]
+        }
+      ];
+
+      const apiKey = "";
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+      const payload = {
+        contents: contents,
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      };
+
+      // Exponential Backoff Fetch
+      let response;
+      let delay = 1000;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (response.ok) break;
+        } catch (e) {
+          if (attempt === 2) throw e;
+        }
+        await new Promise(r => setTimeout(r, delay));
+        delay *= 2;
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(`API error HTTP ${response?.status || 'Network Error'}`);
+      }
+
+      const result = await response.json();
+      const rawJson = result?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (!rawJson) {
+        throw new Error("No response content generated by Gemini AI scanner.");
+      }
+
+      const parsedSignal = JSON.parse(rawJson);
+      
+      // Calculate Lot Size recommendation
+      const riskAmount = (accountBalance * (riskPercent / 100));
+      const slPips = parsedSignal.stopLoss.pips || 20;
+      const calculatedLots = (riskAmount / (slPips * pipValue)).toFixed(2);
+
+      const finalSignal = {
+        ...parsedSignal,
+        id: Date.now(),
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: new Date().toLocaleDateString(),
+        calculatedLots: calculatedLots,
+        riskAmount: riskAmount.toFixed(2),
+        currency: accountCurrency
+      };
+
+      setAnalysisResult(finalSignal);
+      setSignalHistory(prev => [finalSignal, ...prev]);
+      playSignalSound(parsedSignal.direction);
+
+    } catch (err) {
+      console.error("Analysis Error:", err);
+      setAnalysisError(err.message || "Failed to analyze charts. Please verify uploaded chart screenshots.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Format Signal for Copying to Telegram/Discord
+  const copySignalToClipboard = () => {
+    if (!analysisResult) return;
+    const text = `🚨 *${brandName} ${analysisResult.tradingStyle.toUpperCase()} SIGNAL* 🚨
+    
+Symbol: #${analysisResult.pair}
+Direction: ${analysisResult.direction}
+Grade: ${analysisResult.setupQuality} (Confidence: ${analysisResult.confidence}%)
+
+📍 Entry: ${analysisResult.entry}
+🛑 Stop Loss: ${analysisResult.stopLoss.price} (${analysisResult.stopLoss.pips} pips)
+🎯 TP1: ${analysisResult.takeProfits[0]?.price || 'N/A'}
+🎯 TP2: ${analysisResult.takeProfits[1]?.price || 'N/A'}
+🎯 TP3: ${analysisResult.takeProfits[2]?.price || 'N/A'}
+
+⚖️ Rec Lot Size: ${analysisResult.calculatedLots} Lots (${riskPercent}% risk = ${analysisResult.currency} ${analysisResult.riskAmount})
+📝 Note: ${analysisResult.executionNotes}`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedSignal(true);
+    setTimeout(() => setCopiedSignal(false), 2500);
+  };
+
+  // Export History as CSV
+  const exportHistoryCSV = () => {
+    if (signalHistory.length === 0) return;
+    const headers = ["Timestamp", "Pair", "Style", "Strategy", "Direction", "Quality", "Confidence", "Entry", "SL", "SL Pips", "TP1", "Lot Size"];
+    const rows = signalHistory.map(s => [
+      s.timestamp,
+      s.pair,
+      s.tradingStyle,
+      s.strategyPreset,
+      s.direction,
+      s.setupQuality,
+      `${s.confidence}%`,
+      `"${s.entry}"`,
+      s.stopLoss.price,
+      s.stopLoss.pips,
+      s.takeProfits[0]?.price || '',
+      s.calculatedLots
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `trading_signals_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Dynamic Theme Classes
+  const getThemeClasses = () => {
+    switch (theme) {
+      case 'cyber-neon':
+        return {
+          bg: 'bg-slate-950 text-slate-100',
+          card: 'bg-slate-900/90 border-emerald-500/30 shadow-lg shadow-emerald-950/20',
+          cardHeader: 'bg-slate-900/80 border-b border-slate-800',
+          accent: 'text-emerald-400',
+          accentBg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
+          btnPrimary: 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold shadow-lg shadow-emerald-500/20',
+          border: 'border-slate-800',
+          subtext: 'text-slate-400'
+        };
+      case 'obsidian-gold':
+        return {
+          bg: 'bg-zinc-950 text-amber-50',
+          card: 'bg-zinc-900/90 border-amber-500/30 shadow-xl shadow-amber-950/20',
+          cardHeader: 'bg-zinc-900 border-b border-zinc-800',
+          accent: 'text-amber-400',
+          accentBg: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
+          btnPrimary: 'bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-zinc-950 font-bold shadow-lg shadow-amber-500/20',
+          border: 'border-zinc-800',
+          subtext: 'text-zinc-400'
+        };
+      case 'slate-dark':
+        return {
+          bg: 'bg-slate-900 text-slate-100',
+          card: 'bg-slate-800/80 border-slate-700 shadow-xl',
+          cardHeader: 'bg-slate-800 border-b border-slate-700',
+          accent: 'text-cyan-400',
+          accentBg: 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400',
+          btnPrimary: 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold',
+          border: 'border-slate-700',
+          subtext: 'text-slate-400'
+        };
+      case 'light':
+      default:
+        return {
+          bg: 'bg-slate-100 text-slate-900',
+          card: 'bg-white border-slate-200 shadow-md',
+          cardHeader: 'bg-slate-50 border-b border-slate-200',
+          accent: 'text-emerald-600',
+          accentBg: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+          btnPrimary: 'bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md',
+          border: 'border-slate-200',
+          subtext: 'text-slate-500'
+        };
+    }
+  };
+
+  const themeStyle = getThemeClasses();
+  const filteredHistory = historyFilter === 'all' 
+    ? signalHistory 
+    : signalHistory.filter(s => s.tradingStyle === historyFilter);
+
+  return (
+    <div className={`min-h-screen font-sans ${themeStyle.bg} transition-colors duration-300 flex flex-col`}>
+      
+      {/* HEADER / NAVIGATION BAR */}
+      <header className={`px-4 lg:px-8 py-3 ${themeStyle.cardHeader} flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 backdrop-blur-md`}>
+        <div className="flex items-center gap-3">
+          {customLogo ? (
+            <img src={customLogo} alt="Brand Logo" className="h-9 w-9 object-contain rounded-lg border border-slate-700/50" />
+          ) : (
+            <div className={`p-2 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 shadow-md shadow-emerald-500/20`}>
+              <BarChart2 className="w-6 h-6 stroke-[2.5]" />
+            </div>
+          )}
+          <div>
+            <h1 className="text-xl font-black tracking-wider flex items-center gap-2">
+              {brandName}
+              <span className="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                AI SCANNER PRO
+              </span>
+            </h1>
+            <p className={`text-xs ${themeStyle.subtext}`}>Multi-Style Forex Chart Vision & Signal Terminal</p>
+          </div>
+        </div>
+
+        {/* Tab Controls & Theme Switcher */}
+        <div className="flex items-center gap-2 lg:gap-4 flex-wrap">
+          <nav className="flex items-center gap-1 bg-slate-950/40 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setActiveTab('scanner')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'scanner' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Layers className="w-4 h-4" /> Scanner
+            </button>
+            <button
+              onClick={() => setActiveTab('risk')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'risk' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Calculator className="w-4 h-4" /> Position Calculator
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'history' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <ShieldAlert className="w-4 h-4" /> Signal Log ({signalHistory.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'settings' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Settings className="w-4 h-4" /> Settings
+            </button>
+          </nav>
+
+          {/* Sound Toggle */}
+          <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className={`p-2 rounded-lg border transition-all ${
+              soundEnabled ? 'bg-slate-800/80 text-emerald-400 border-slate-700' : 'bg-slate-800/40 text-slate-500 border-slate-800'
+            }`}
+            title="Toggle Alert Sounds"
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
+        </div>
+      </header>
+
+      {/* MAIN CONTAINER */}
+      <main className="flex-1 p-4 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
+
+        {/* TAB 1: SCANNER & ANALYSIS */}
+        {activeTab === 'scanner' && (
+          <div className="space-y-6">
+            
+            {/* TRADING STYLE & STRATEGY CONTROL BAR */}
+            <div className={`p-4 rounded-2xl ${themeStyle.card} border grid grid-cols-1 md:grid-cols-12 gap-4 items-center`}>
+              
+              {/* Trading Style Selector */}
+              <div className="md:col-span-6 space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-emerald-400" /> Trading Style Mode
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+                  {[
+                    { id: 'scalping', label: 'Scalping', desc: '1M/5M/15M' },
+                    { id: 'day', label: 'Day Trading', desc: '15M/1H/4H' },
+                    { id: 'swing', label: 'Swing', desc: '1H/4H/1D' },
+                    { id: 'position', label: 'Position', desc: '4H/1D/1W' }
+                  ].map(style => (
+                    <button
+                      key={style.id}
+                      onClick={() => setTradingStyle(style.id)}
+                      className={`px-2.5 py-1.5 rounded-lg text-center transition-all ${
+                        tradingStyle === style.id
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 font-bold'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="text-xs">{style.label}</div>
+                      <div className="text-[9px] text-slate-500">{style.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Strategy Framework Selector */}
+              <div className="md:col-span-4 space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5 text-cyan-400" /> Strategy Framework
+                </label>
+                <select
+                  value={strategyPreset}
+                  onChange={(e) => setStrategyPreset(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-semibold focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="smc">Smart Money Concepts (SMC / ICT)</option>
+                  <option value="retail">Retail Price Action (Breakouts & Patterns)</option>
+                  <option value="hybrid">Hybrid / Indicator Confluence (EMAs/RSI)</option>
+                </select>
+              </div>
+
+              {/* Pair Symbol Selector */}
+              <div className="md:col-span-2 space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Asset Pair</label>
+                <select
+                  value={pairSymbol}
+                  onChange={(e) => setPairSymbol(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-bold focus:outline-none focus:border-emerald-500"
+                >
+                  {['EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD (Gold)', 'AUD/USD', 'BTC/USD', 'GBP/JPY', 'US30', 'NAS100'].map(pair => (
+                    <option key={pair} value={pair}>{pair}</option>
+                  ))}
+                </select>
+              </div>
+
+            </div>
+
+            {/* SCANNER WORKSPACE: DROPZONES & RESULTS */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* LEFT COLUMN: MULTI-TIMEFRAME IMAGE DROPZONES */}
+              <div className="lg:col-span-6 space-y-5">
+                <div className={`p-5 rounded-2xl ${themeStyle.card} border flex flex-col gap-4`}>
+                  <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
+                    <div>
+                      <h2 className="text-base font-bold flex items-center gap-2">
+                        <ImageIcon className={`w-5 h-5 ${themeStyle.accent}`} /> Multi-Timeframe Chart Input
+                      </h2>
+                      <p className={`text-xs ${themeStyle.subtext}`}>
+                        Upload up to 3 timeframes adapted for <span className="font-bold text-emerald-400 uppercase">{tradingStyle}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 3 Upload Dropzones */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {Object.entries(timeframes).map(([key, tf]) => {
+                      const tfLabel = tfLabels[key];
+                      return (
+                        <div key={key} className="flex flex-col gap-1.5">
+                          <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                            <span className="text-emerald-400 font-bold">{key.toUpperCase()}</span>
+                            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">{tfLabel}</span>
+                          </span>
+
+                          <div className={`relative h-44 rounded-xl border-2 border-dashed transition-all flex flex-col items-center justify-center p-2 text-center group ${
+                            tf.preview 
+                              ? 'border-emerald-500/50 bg-slate-950/60' 
+                              : 'border-slate-800 hover:border-emerald-500/40 bg-slate-950/20'
+                          }`}>
+                            {tf.preview ? (
+                              <div className="relative w-full h-full flex flex-col items-center justify-center">
+                                <img
+                                  src={tf.preview}
+                                  alt={`${tf.name} chart`}
+                                  className="w-full h-full object-cover rounded-lg cursor-pointer"
+                                  onClick={() => setSelectedPreviewImage({ url: tf.preview, title: `${key.toUpperCase()} - ${tfLabel}` })}
+                                />
+                                <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 rounded-lg backdrop-blur-xs">
+                                  <button
+                                    onClick={() => setSelectedPreviewImage({ url: tf.preview, title: `${key.toUpperCase()} - ${tfLabel}` })}
+                                    className="p-2 bg-slate-800/90 hover:bg-slate-700 rounded-lg text-slate-200 text-xs flex items-center gap-1"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" /> View
+                                  </button>
+                                  <button
+                                    onClick={() => removeImage(key)}
+                                    className="p-2 bg-rose-900/80 hover:bg-rose-800 rounded-lg text-rose-200 text-xs flex items-center gap-1"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" /> Remove
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <label className="cursor-pointer w-full h-full flex flex-col items-center justify-center gap-2 p-3">
+                                <div className="p-2.5 rounded-full bg-slate-800/60 text-slate-400 group-hover:text-emerald-400 group-hover:bg-emerald-500/10 transition-colors">
+                                  <Upload className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <p className="text-xs font-semibold text-slate-300">Drop screenshot</p>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">{tfLabel}</p>
+                                </div>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => handleFileUpload(key, e.target.files[0])}
+                                />
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Pro Tip Box */}
+                  <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 text-xs text-slate-400 flex items-start gap-2.5">
+                    <Info className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-semibold text-slate-300">Style Tip: </span>
+                      For <span className="text-emerald-400 font-semibold">{tradingStyle.toUpperCase()}</span>, upload HTF for market direction and LTF for precise entry candle trigger.
+                    </div>
+                  </div>
+
+                  {/* Scan Action Button */}
+                  <button
+                    onClick={analyzeCharts}
+                    disabled={isAnalyzing}
+                    className={`w-full py-3.5 px-6 rounded-xl flex items-center justify-center gap-3 transition-all ${themeStyle.btnPrimary} ${
+                      isAnalyzing ? 'opacity-50 cursor-not-allowed' : 'hover:scale-[1.01] active:scale-[0.99]'
+                    }`}
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <RefreshCw className="w-5 h-5 animate-spin text-slate-950" />
+                        <span>Analyzing {tradingStyle.toUpperCase()} Structure...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-5 h-5" />
+                        <span>RUN AI MULTI-TIMEFRAME ANALYSIS</span>
+                      </>
+                    )}
+                  </button>
+
+                  {analysisError && (
+                    <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                      <span>{analysisError}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: DETAILED SIGNAL OUTPUT */}
+              <div className="lg:col-span-6">
+                {analysisResult ? (
+                  <div className={`p-6 rounded-2xl ${themeStyle.card} border space-y-5 animate-in fade-in duration-300`}>
+                    
+                    {/* Signal Header & Setup Quality */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-3 rounded-xl font-bold flex items-center gap-2 text-lg shadow-inner ${
+                          analysisResult.direction.includes('BUY') 
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' 
+                            : analysisResult.direction.includes('SELL')
+                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                        }`}>
+                          {analysisResult.direction.includes('BUY') ? (
+                            <TrendingUp className="w-6 h-6 stroke-[2.5]" />
+                          ) : analysisResult.direction.includes('SELL') ? (
+                            <TrendingDown className="w-6 h-6 stroke-[2.5]" />
+                          ) : (
+                            <AlertTriangle className="w-6 h-6" />
+                          )}
+                          <span>{analysisResult.direction}</span>
+                        </div>
+                        <div>
+                          <div className="text-lg font-bold tracking-tight">{analysisResult.pair}</div>
+                          <div className="text-xs text-slate-400">
+                            {analysisResult.tradingStyle.toUpperCase()} • {analysisResult.timestamp}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2.5 py-1 rounded-lg border text-xs font-black uppercase ${
+                          analysisResult.setupQuality === 'A+ Setup' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                          analysisResult.setupQuality === 'A Setup' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' :
+                          'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        }`}>
+                          <Award className="w-3.5 h-3.5 inline mr-1" />
+                          {analysisResult.setupQuality}
+                        </span>
+
+                        <button
+                          onClick={copySignalToClipboard}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                        >
+                          {copiedSignal ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
+                          <span>{copiedSignal ? 'Copied!' : 'Share'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Entry, Stop Loss, & Rec Lot Size */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800">
+                        <div className="text-[11px] text-slate-400 font-semibold uppercase flex items-center gap-1.5">
+                          <Target className="w-3.5 h-3.5 text-cyan-400" /> Entry Zone
+                        </div>
+                        <div className="text-sm font-bold text-slate-100 mt-1">{analysisResult.entry}</div>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-950/60 border border-rose-500/20">
+                        <div className="text-[11px] text-rose-400 font-semibold uppercase flex items-center gap-1.5">
+                          <ShieldAlert className="w-3.5 h-3.5" /> Stop Loss (SL)
+                        </div>
+                        <div className="text-sm font-bold text-rose-300 mt-1">
+                          {analysisResult.stopLoss.price} 
+                          <span className="text-xs text-rose-400 font-normal ml-1">
+                            ({analysisResult.stopLoss.pips} pips)
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-950/60 border border-emerald-500/20">
+                        <div className="text-[11px] text-emerald-400 font-semibold uppercase flex items-center gap-1.5">
+                          <Calculator className="w-3.5 h-3.5" /> Rec Lot Size
+                        </div>
+                        <div className="text-sm font-bold text-emerald-300 mt-1">
+                          {analysisResult.calculatedLots} Lots
+                          <span className="text-[10px] text-slate-400 font-normal block">
+                            Risk: {analysisResult.currency} {analysisResult.riskAmount} ({riskPercent}%)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* TAKE PROFIT TARGETS */}
+                    <div className="space-y-2">
+                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <DollarSign className="w-4 h-4 text-emerald-400" /> Take Profit Targets
+                      </span>
+                      <div className="grid grid-cols-3 gap-2">
+                        {analysisResult.takeProfits?.map((tp, idx) => (
+                          <div key={idx} className="p-3 rounded-xl bg-slate-950/80 border border-emerald-500/20 flex flex-col justify-between">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-emerald-400">{tp.target}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 font-mono">
+                                {tp.rr}
+                              </span>
+                            </div>
+                            <div className="text-sm font-bold text-slate-100 mt-2">{tp.price}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* STYLE SPECIFIC EXECUTION NOTES */}
+                    {analysisResult.executionNotes && (
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-start gap-2">
+                        <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-amber-300 uppercase">{analysisResult.tradingStyle} Advice: </span>
+                          {analysisResult.executionNotes}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CONFLUENCE CHECKLIST */}
+                    <div className="space-y-2 pt-2 border-t border-slate-800/80">
+                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <CheckCircle className="w-4 h-4 text-emerald-400" /> Multi-Timeframe Confluence
+                      </span>
+                      <ul className="space-y-1.5">
+                        {analysisResult.confluences?.map((conf, i) => (
+                          <li key={i} className="text-xs text-slate-300 flex items-start gap-2 bg-slate-950/40 p-2 rounded-lg border border-slate-800/60">
+                            <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                            <span>{conf}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {/* TECHNICAL REASONING SUMMARY */}
+                    <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5">
+                      <div className="text-xs font-bold text-slate-300 uppercase">Technical Summary</div>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        {analysisResult.reasoningSummary}
+                      </p>
+                    </div>
+
+                  </div>
+                ) : (
+                  <div className={`h-full min-h-[400px] p-8 rounded-2xl ${themeStyle.card} border flex flex-col items-center justify-center text-center gap-4`}>
+                    <div className="p-4 rounded-2xl bg-slate-800/40 text-slate-500 border border-slate-800">
+                      <Sparkles className="w-8 h-8" />
+                    </div>
+                    <div className="max-w-sm space-y-1">
+                      <h3 className="text-base font-bold text-slate-200">Awaiting Chart Screenshots</h3>
+                      <p className="text-xs text-slate-400">
+                        Upload your chart screenshots and click "Run AI Multi-Timeframe Analysis" to extract high-confluence signals.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: POSITION & RISK CALCULATOR */}
+        {activeTab === 'risk' && (
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className={`p-6 rounded-2xl ${themeStyle.card} border space-y-6`}>
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <Calculator className={`w-5 h-5 ${themeStyle.accent}`} /> Risk & Lot Size Calculator
+                </h2>
+                <p className={`text-xs ${themeStyle.subtext}`}>
+                  Calculate exact standard, mini, and micro lot sizes tailored to your account balance and currency.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Account Currency</label>
+                  <select
+                    value={accountCurrency}
+                    onChange={(e) => setAccountCurrency(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 font-bold focus:outline-none focus:border-emerald-500"
+                  >
+                    {['USD', 'EUR', 'GBP', 'ZAR', 'JPY'].map(curr => (
+                      <option key={curr} value={curr}>{curr}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Account Balance ({accountCurrency})</label>
+                  <input
+                    type="number"
+                    value={accountBalance}
+                    onChange={(e) => setAccountBalance(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Risk Percentage (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={riskPercent}
+                    onChange={(e) => setRiskPercent(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Stop Loss (Pips)</label>
+                  <input
+                    type="number"
+                    value={analysisResult?.stopLoss?.pips || 20}
+                    readOnly
+                    className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-400"
+                  />
+                </div>
+              </div>
+
+              {/* Calculated Outputs */}
+              <div className="pt-4 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="p-4 rounded-xl bg-slate-950/80 border border-emerald-500/30 text-center">
+                  <div className="text-xs text-slate-400 font-semibold uppercase">Risk Amount</div>
+                  <div className="text-xl font-black text-emerald-400 mt-1">
+                    {accountCurrency} {((accountBalance * riskPercent) / 100).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-950/80 border border-emerald-500/30 text-center">
+                  <div className="text-xs text-slate-400 font-semibold uppercase">Standard Lots</div>
+                  <div className="text-xl font-black text-slate-100 mt-1">
+                    {(((accountBalance * (riskPercent / 100)) / ((analysisResult?.stopLoss?.pips || 20) * pipValue))).toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-950/80 border border-emerald-500/30 text-center">
+                  <div className="text-xs text-slate-400 font-semibold uppercase">Micro Lots</div>
+                  <div className="text-xl font-black text-slate-100 mt-1">
+                    {((((accountBalance * (riskPercent / 100)) / ((analysisResult?.stopLoss?.pips || 20) * pipValue))) * 100).toFixed(0)} Micro
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: SIGNAL HISTORY LOG */}
+        {activeTab === 'history' && (
+          <div className={`p-6 rounded-2xl ${themeStyle.card} border space-y-4`}>
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <ShieldAlert className={`w-5 h-5 ${themeStyle.accent}`} /> Analyzed Signal Session Log
+                </h2>
+                <p className={`text-xs ${themeStyle.subtext}`}>History of AI evaluated chart signals in current session</p>
+              </div>
+
+              {/* History Controls */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
+                  {['all', 'scalping', 'day', 'swing'].map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => setHistoryFilter(mode)}
+                      className={`px-2.5 py-1 rounded capitalize font-semibold transition-colors ${
+                        historyFilter === mode ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+
+                {signalHistory.length > 0 && (
+                  <button
+                    onClick={exportHistoryCSV}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1"
+                  >
+                    <Download className="w-3.5 h-3.5" /> CSV Export
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {filteredHistory.length === 0 ? (
+              <div className="py-12 text-center text-xs text-slate-500">
+                No signals found for the selected filter. Run analysis on the Scanner tab.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950/60 text-slate-400 uppercase font-semibold border-b border-slate-800">
+                    <tr>
+                      <th className="p-3">Time</th>
+                      <th className="p-3">Pair</th>
+                      <th className="p-3">Style</th>
+                      <th className="p-3">Signal</th>
+                      <th className="p-3">Quality</th>
+                      <th className="p-3">Confidence</th>
+                      <th className="p-3">Entry Zone</th>
+                      <th className="p-3">Stop Loss</th>
+                      <th className="p-3">Lots</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {filteredHistory.map((sig) => (
+                      <tr key={sig.id} className="hover:bg-slate-950/30 transition-colors">
+                        <td className="p-3 text-slate-400">{sig.timestamp}</td>
+                        <td className="p-3 font-bold text-slate-100">{sig.pair}</td>
+                        <td className="p-3 font-semibold uppercase text-cyan-400">{sig.tradingStyle}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-1 rounded font-bold text-[10px] ${
+                            sig.direction.includes('BUY') ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                          }`}>
+                            {sig.direction}
+                          </span>
+                        </td>
+                        <td className="p-3 font-bold text-amber-300">{sig.setupQuality}</td>
+                        <td className="p-3 text-emerald-400 font-bold">{sig.confidence}%</td>
+                        <td className="p-3 font-mono">{sig.entry}</td>
+                        <td className="p-3 text-rose-300 font-mono">{sig.stopLoss.price} ({sig.stopLoss.pips}p)</td>
+                        <td className="p-3 font-bold text-emerald-400">{sig.calculatedLots}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 4: SETTINGS & BRANDING CUSTOMIZATION */}
+        {activeTab === 'settings' && (
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className={`p-6 rounded-2xl ${themeStyle.card} border space-y-6`}>
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <Palette className={`w-5 h-5 ${themeStyle.accent}`} /> Customization & Platform Settings
+                </h2>
+                <p className={`text-xs ${themeStyle.subtext}`}>
+                  Tailor visual theme and upload custom logo branding.
+                </p>
+              </div>
+
+              {/* Theme Switcher */}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-300">Select Platform Color Theme</label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { id: 'cyber-neon', name: 'Cyber Neon', desc: 'Emerald Neon Theme' },
+                    { id: 'obsidian-gold', name: 'Obsidian Gold', desc: 'Luxury Amber Accent' },
+                    { id: 'slate-dark', name: 'Slate Dark', desc: 'Cyan Terminal Theme' },
+                    { id: 'light', name: 'Light Pro', desc: 'Clean White Mode' }
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => setTheme(t.id)}
+                      className={`p-3 rounded-xl border text-left transition-all ${
+                        theme === t.id 
+                          ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400' 
+                          : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="text-xs font-bold text-slate-200">{t.name}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Branding Customization */}
+              <div className="space-y-4 pt-4 border-t border-slate-800">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Platform Title / Brand Name</label>
+                  <input
+                    type="text"
+                    value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Custom Brand Icon / Image URL</label>
+                  <input
+                    type="text"
+                    placeholder="https://example.com/your-logo.png"
+                    value={customLogo}
+                    onChange={(e) => setCustomLogo(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* FULLSCREEN IMAGE INSPECTION MODAL */}
+      {selectedPreviewImage && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="relative max-w-5xl w-full max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span className="text-sm font-bold text-slate-200">{selectedPreviewImage.title}</span>
+              <button
+                onClick={() => setSelectedPreviewImage(null)}
+                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto flex items-center justify-center">
+              <img
+                src={selectedPreviewImage.url}
+                alt="Full Preview"
+                className="max-w-full max-h-[75vh] object-contain rounded-lg"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FOOTER */}
+      <footer className="px-6 py-4 border-t border-slate-800/60 text-center text-[11px] text-slate-500 flex flex-col md:flex-row items-center justify-between gap-2">
+        <div>© 2026 {brandName} • Powered by Gemini Vision Multi-Style Trading Engine</div>
+        <div className="text-slate-600">Trading financial instruments carries high risk. Always manage risk carefully.</div>
+      </footer>
+
+    </div>
+  );
+}
